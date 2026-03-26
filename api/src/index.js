@@ -743,4 +743,9 @@ app.get("/health", (req, res) => res.json({
   features: ["chunking", "multi-format", "lightrag", "streaming", "markdown"]
 }));
 
+// --- ENDPOINT RAÍZ ---
+app.get("/", (req, res) => {
+  res.send("🟢 RAG API corriendo. Usa /query, /upload o /ingest para interactuar.");
+});
+
 app.listen(PORT, () => console.log(`RAG API listening on http://localhost:${PORT}`));
