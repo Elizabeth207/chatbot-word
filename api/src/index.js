@@ -115,7 +115,9 @@ const app = express();
 app.use(cors({
   origin: [
     "https://chatbot-word.vercel.app",
+    "https://chatbot-word-2ox7uv19h-elizabeth-huarcaya-2b27d044.vercel.app",
     "http://localhost:3000",
+    "http://localhost:5173",
     "https://chatbot-word-production.up.railway.app"
   ],
   methods: ["GET", "POST"]
