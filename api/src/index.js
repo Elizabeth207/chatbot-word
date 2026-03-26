@@ -112,7 +112,14 @@ function getConversationalResponse(message) {
 
 // Inicialización de Express y middlewares
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: [
+    "https://chatbot-word.vercel.app",
+    "http://localhost:3000",
+    "https://chatbot-word-production.up.railway.app"
+  ],
+  methods: ["GET", "POST"]
+}));
 // Permitimos JSON con un límite razonable para evitar cargas excesivas
 app.use(express.json({ limit: "2mb" }));
 

@@ -6,6 +6,12 @@ import { SettingsBar } from "./components/SettingsBar";
 import { ChatMessages } from "./components/ChatMessages";
 import { ChatInput } from "./components/ChatInput";
 
+// Detectar si estamos en producción o desarrollo
+const RAILWAY_API_URL =
+  process.env.NODE_ENV === "production"
+    ? "https://chatbot-word-production.up.railway.app"
+    : "http://localhost:3000";
+
 function App() {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -40,14 +46,14 @@ function App() {
         fd.append("k", "4");
         fd.append("sessionId", sessionId);
 
-        response = await fetch("http://localhost:3000/query-multimodal", {
+        response = await fetch(`${RAILWAY_API_URL}/query-multimodal`, {
           method: "POST",
           body: fd,
         });
       } else if (question.trim()) {
         // Solo texto: usar endpoint normal con streaming
         const body = { question, useLightRAG, k: 4, sessionId };
-        response = await fetch("http://localhost:3000/query", {
+        response = await fetch(`${RAILWAY_API_URL}/query`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
@@ -136,7 +142,7 @@ function App() {
       const fd = new FormData();
       fd.append("file", file, file.name);
       fd.append("sessionId", sessionId);
-      const resp = await fetch("http://localhost:3000/upload", {
+      const resp = await fetch(`${RAILWAY_API_URL}/upload`, {
         method: "POST",
         body: fd,
       });
