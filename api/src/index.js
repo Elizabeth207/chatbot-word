@@ -12,6 +12,8 @@ import multer from "multer";
 
 dotenv.config();
 
+const PORT = process.env.PORT || 3000;
+
 const sessionStates = new Map();
 
 function getSessionState(sessionId = 'default') {
