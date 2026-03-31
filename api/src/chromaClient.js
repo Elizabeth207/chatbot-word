@@ -1,9 +1,5 @@
-// Cliente de la base de datos vectorial.
-// Intentamos usar la librería `chromadb` si está instalada;
-// si no está disponible, devolvemos un almacén en memoria (no persistente)
 let chromaClient = null;
 
-// Implementación básica en memoria para desarrollo/local
 class InMemoryCollection {
   constructor(name) {
     this.name = name;
@@ -24,11 +20,10 @@ class InMemoryCollection {
 
   async upsert(payload) { return this.add(payload); }
 
-  // very simple cosine similarity search (assumes embeddings are arrays of numbers)
   async query({ query_embeddings = [], n_results = 4, include = [] } = {}) {
     const q = query_embeddings[0];
     if (!q) return { results: [{ documents: [], metadatas: [], embeddings: [], distances: [] }] };
-    
+
     const scores = this.embeddings.map((emb, idx) => {
       let dot = 0, aq = 0, ab = 0;
       for (let i = 0; i < Math.min(emb.length, q.length); i++) {
@@ -38,14 +33,13 @@ class InMemoryCollection {
       }
       const denom = Math.sqrt(aq) * Math.sqrt(ab) || 1e-8;
       const similarity = dot / denom;
-      const distance = 1 - similarity; // Convertir similitud a distancia
+      const distance = 1 - similarity;
       return { idx, similarity, distance };
     });
-    
+
     scores.sort((a, b) => b.similarity - a.similarity);
     const top = scores.slice(0, n_results);
-    
-    // Retornar en formato Chroma: results[0] contiene documentos, metadatas, embeddings, distances
+
     return {
       results: [{
         documents: top.map(t => this.documents[t.idx]),
@@ -61,30 +55,25 @@ class InMemoryCollection {
 const inMemoryStore = new Map();
 
 export async function getCollection(name = "documents") {
-
   if (!chromaClient) {
     try {
- 
       const mod = await import('chromadb');
-    
+
       if (mod && typeof mod.ChromaClient === 'function') {
         try {
           chromaClient = new mod.ChromaClient();
         } catch (e) {
-      
           chromaClient = mod.default ? new mod.default() : mod();
         }
       } else if (mod && typeof mod === 'function') {
         chromaClient = mod();
       }
     } catch (e) {
-    
       chromaClient = null;
     }
   }
 
   if (chromaClient) {
-   
     if (typeof chromaClient.getOrCreateCollection === 'function') {
       return await chromaClient.getOrCreateCollection(name);
     }
@@ -96,9 +85,7 @@ export async function getCollection(name = "documents") {
     return chromaClient;
   }
 
-
   if (!inMemoryStore.has(name)) inMemoryStore.set(name, new InMemoryCollection(name));
-  // Si no hay cliente Chroma, devolvemos la colección en memoria
   return inMemoryStore.get(name);
 }
 
