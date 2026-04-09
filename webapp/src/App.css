@@ -9,16 +9,21 @@ body {
   color: #e5e7eb;
 }
 
-.chat-root {
+/* Main Layout */
+.app-layout {
+  display: flex;
   width: 100%;
-  max-width: 1200px;
-  margin: 0 auto;
+  height: 100vh;
+  background: #0f0f0f;
+}
+
+.chat-root {
+  flex: 1;
   display: flex;
   flex-direction: column;
   height: 100vh;
   background: #0f0f0f;
-  box-shadow: 0 0 20px rgba(0,0,0,0.5);
-  border: 1px solid #374151;
+  border-left: 1px solid #374151;
 }
 
 /* HEADER */
@@ -740,6 +745,23 @@ body {
   word-break: break-word;
 }
 
+.file-extracted-text {
+  padding: 12px;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  background: #111111;
+  color: #d1d5db;
+  font-size: 13px;
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+
+.file-extracted-text strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #f3f4f6;
+}
+
 .file-card-meta {
   display: flex;
   gap: 12px;
@@ -783,8 +805,31 @@ body {
 
 /* RESPONSIVE */
 @media (max-width: 768px) {
+  .app-layout {
+    position: relative;
+  }
+
+  .sidebar {
+    position: fixed;
+    left: -260px;
+    top: 0;
+    width: 260px;
+    height: 100vh;
+    z-index: 200;
+    transition: left 0.3s ease;
+  }
+
+  .sidebar.open {
+    left: 0;
+  }
+
+  .sidebar-toggle {
+    display: flex !important;
+  }
+
   .chat-root {
-    border-radius: 0;
+    border-left: none;
+    width: 100%;
   }
 
   .chat-header,

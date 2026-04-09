@@ -6,12 +6,12 @@ export async function generateAnswer(context, question) {
   if (!DEEPSEEK_API_KEY) {
     const ctx = (context || "").replace(/\r/g, "\n");
     const preview = ctx.slice(0, 500);
-    return `MOCK ANSWER: No hay DEEPSEEK_API_KEY configurada.\nPregunta: ${question}\nContexto: ${preview}...\n\nConfigura DEEPSEEK_API_KEY en .env para respuestas reales.`;
+    return `MOCK ANSWER: No hay DEEPSEEK_API_KEY configurada.\nPregunta: ${question}\nContexto (primeros 500 chars): ${preview}...\n\nConfigura DEEPSEEK_API_KEY en .env para respuestas reales.`;
   }
 
-  const systemPrompt = context
-    ? `You are a helpful AI assistant. Use the following context to answer questions accurately. If the context is not relevant or insufficient, supplement with your general knowledge. Respond in the same language as the question. Use markdown formatting for better readability.\n\nContext:\n${context}`
-    : "You are a helpful AI assistant. Answer questions accurately and comprehensively. Respond in the same language as the question. Use markdown formatting when appropriate.";
+  const systemPrompt = context && context.trim().length > 0
+    ? `You are a document analysis assistant. Answer questions based ONLY on the provided context from uploaded documents. If the information is not available in the context, respond with "No se encontró información relevante en los documentos subidos." Do not use external knowledge or make assumptions. Respond in the same language as the question. Use markdown formatting for better readability.\n\nContext:\n${context}`
+    : "You are a document analysis assistant. Since no documents have been uploaded or found, I cannot provide information. Please upload documents first and then ask questions about their content.";
 
   const payload = {
     model: "deepseek-chat",
@@ -24,6 +24,8 @@ export async function generateAnswer(context, question) {
   };
 
   try {
+    console.log(`[DeepSeek] Enviando pregunta: "${question}" con context length: ${(context || "").length}`);
+    
     const res = await fetch(`${DEEPSEEK_API_URL}/chat/completions`, {
       method: "POST",
       headers: {
@@ -42,6 +44,7 @@ export async function generateAnswer(context, question) {
     const data = await res.json();
 
     if (data.choices && data.choices[0]?.message?.content) {
+      console.log(`[DeepSeek] Respuesta generada exitosamente`);
       return data.choices[0].message.content;
     }
 

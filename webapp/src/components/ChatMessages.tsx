@@ -52,6 +52,12 @@ export function ChatMessages({ messages, loading }: ChatMessagesProps) {
                         </div>
                       </div>
                     )}
+                    {m.fileInfo.extractedText && (
+                      <div className="file-extracted-text">
+                        <strong>Texto extraído:</strong>
+                        <div>{m.fileInfo.extractedText}</div>
+                      </div>
+                    )}
                   </div>
                 )}
                 <div className="text">

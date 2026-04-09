@@ -10,6 +10,7 @@ export type Message = {
     chunksCount?: number;
     textLength?: number;
     approxTokens?: number;
+    extractedText?: string;
   };
   metadata?: {
     docsUsed?: number;

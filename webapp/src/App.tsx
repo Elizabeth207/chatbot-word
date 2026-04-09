@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import "./App.css";
 import type { Message } from "./types";
+import type { Chat } from "./components/Sidebar";
+import { Sidebar } from "./components/Sidebar";
 import { ChatHeader } from "./components/ChatHeader";
 import { SettingsBar } from "./components/SettingsBar";
 import { ChatMessages } from "./components/ChatMessages";
@@ -11,7 +13,13 @@ const RAILWAY_API_URL =
     ? "https://chatbot-word-production.up.railway.app"
     : "http://localhost:3000";
 
+const STORAGE_KEY = "chatbot_conversations";
+
 function App() {
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [activeChat, setActiveChat] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
@@ -21,24 +29,129 @@ function App() {
   const [useLightRAG, setUseLightRAG] = useState(true);
   const [sessionId] = useState(() => `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
 
+  // Cargar chats del localStorage al iniciar
+  useEffect(() => {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        setChats(parsed);
+        if (parsed.length > 0) {
+          setActiveChat(parsed[0].id);
+          loadChatMessages(parsed[0].id);
+        }
+      } catch (e) {
+        console.error("Error cargando chats:", e);
+      }
+    } else {
+      createNewChat();
+    }
+  }, []);
+
+  // Guardar chats en localStorage cuando cambian
+  useEffect(() => {
+    if (chats.length > 0) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(chats));
+    }
+  }, [chats]);
+
+  function generateTitle(text: string): string {
+    const words = text.trim().split(/\s+/).slice(0, 6).join(" ");
+    return words.length > 30 ? words.substring(0, 27) + "..." : words;
+  }
+
+  function createNewChat() {
+    const newChat: Chat = {
+      id: `chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      title: "Nuevo Chat",
+      createdAt: Date.now(),
+    };
+    setChats((prev) => [newChat, ...prev]);
+    setActiveChat(newChat.id);
+    setMessages([]);
+    setQuestion("");
+    setFile(null);
+    setImagePreview(null);
+  }
+
+  function loadChatMessages(chatId: string) {
+    const chat = chats.find((c) => c.id === chatId);
+    if (chat) {
+      const stored = localStorage.getItem(`chat_messages_${chatId}`);
+      if (stored) {
+        try {
+          setMessages(JSON.parse(stored));
+        } catch (e) {
+          console.error("Error cargando mensajes:", e);
+          setMessages([]);
+        }
+      } else {
+        setMessages([]);
+      }
+    }
+  }
+
+  function updateCurrentChat(newMessages: Message[]) {
+    if (activeChat) {
+      localStorage.setItem(`chat_messages_${activeChat}`, JSON.stringify(newMessages));
+      setMessages(newMessages);
+
+      // Actualizar título si es el primer mensaje
+      if (newMessages.length === 1 && newMessages[0].role === "user") {
+        setChats((prev) =>
+          prev.map((chat) =>
+            chat.id === activeChat
+              ? { ...chat, title: generateTitle(newMessages[0].text) }
+              : chat
+          )
+        );
+      }
+    }
+  }
+
+  function deleteChat(chatId: string) {
+    setChats((prev) => prev.filter((c) => c.id !== chatId));
+    localStorage.removeItem(`chat_messages_${chatId}`);
+
+    if (activeChat === chatId) {
+      const remaining = chats.filter((c) => c.id !== chatId);
+      if (remaining.length > 0) {
+        setActiveChat(remaining[0].id);
+        loadChatMessages(remaining[0].id);
+      } else {
+        createNewChat();
+      }
+    }
+  }
+
   async function send() {
     if (!question.trim() && !imagePreview) return;
 
     const userMsg: Message = {
       role: "user",
       text: question || "(Imagen sin mensaje de texto)",
-      time: new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })
+      time: new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }),
+      fileInfo: file
+        ? {
+            filename: file.name,
+            type: file.type.startsWith("image/") ? "image" : "document",
+            size: file.size,
+            preview: file.type.startsWith("image/") ? imagePreview || undefined : undefined,
+          }
+        : undefined
     };
-    setMessages((m) => [...m, userMsg]);
+    
+    const newMessages = [...messages, userMsg];
+    updateCurrentChat(newMessages);
     setQuestion("");
     setLoading(true);
 
     try {
       let response;
 
-      if (imagePreview && file) {
+      if (file) {
         const fd = new FormData();
-        fd.append("question", question.trim() || "Analiza esta imagen");
+        fd.append("question", question.trim() || "Resume este documento");
         fd.append("image", file);
         fd.append("useLightRAG", String(useLightRAG));
         fd.append("k", "4");
@@ -48,6 +161,23 @@ function App() {
           method: "POST",
           body: fd,
         });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || JSON.stringify(data));
+
+        const assistantMsg: Message = {
+          role: "assistant",
+          text: data.answer || "No se obtuvo respuesta.",
+          time: new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }),
+          metadata: {
+            docsUsed: data.docs?.length,
+            usedLightRAG: data.usedLightRAG
+          }
+        };
+        updateCurrentChat([...newMessages, assistantMsg]);
+        setImagePreview(null);
+        setFile(null);
+        return;
       } else if (question.trim()) {
         const body = { question, useLightRAG, k: 4, sessionId };
         response = await fetch(`${RAILWAY_API_URL}/query`, {
@@ -71,7 +201,9 @@ function App() {
           time: new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }),
           metadata: {}
         };
-        setMessages((m) => [...m, assistantMsg]);
+        
+        const messagesWithAssistant = [...newMessages, assistantMsg];
+        updateCurrentChat(messagesWithAssistant);
 
         try {
           while (true) {
@@ -87,14 +219,10 @@ function App() {
                   const data = JSON.parse(line.slice(6));
                   if (data.token) {
                     accumulatedAnswer += data.token;
-                    setMessages((m) => {
-                      const newMsgs = [...m];
-                      const lastMsg = newMsgs[newMsgs.length - 1];
-                      if (lastMsg.role === "assistant") {
-                        lastMsg.text = accumulatedAnswer;
-                      }
-                      return newMsgs;
-                    });
+                    updateCurrentChat([
+                      ...messagesWithAssistant.slice(0, -1),
+                      { ...assistantMsg, text: accumulatedAnswer }
+                    ]);
                   } else if (data.complete) {
                     metadata = data.complete;
                   }
@@ -107,21 +235,25 @@ function App() {
           throw err;
         }
 
-        setMessages((m) => {
-          const newMsgs = [...m];
-          const lastMsg = newMsgs[newMsgs.length - 1];
-          if (lastMsg.role === "assistant") {
-            lastMsg.metadata = {
+        updateCurrentChat([
+          ...messagesWithAssistant.slice(0, -1),
+          {
+            ...assistantMsg,
+            text: accumulatedAnswer,
+            metadata: {
               docsUsed: metadata.docs?.length,
               usedLightRAG: metadata.usedLightRAG
-            };
+            }
           }
-          return newMsgs;
-        });
+        ]);
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      setMessages((m) => [...m, { role: "assistant", text: `Error: ${errorMsg}`, time: new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }) }]);
+      updateCurrentChat([...newMessages, { 
+        role: "assistant", 
+        text: `Error: ${errorMsg}`, 
+        time: new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }) 
+      }]);
     } finally {
       setLoading(false);
     }
@@ -150,9 +282,10 @@ function App() {
       const statusMsg = `**${data.id}** subido exitosamente\n\n` +
         `Chunks: ${data.chunksCount} | Caracteres: ${data.textLength?.toLocaleString()} | Tokens: ~${data.metadata?.approxTokens?.toLocaleString()}`;
 
+      const fullText = data.extractedText ? `\n\nTexto extraído:\n${data.extractedText}` : "";
       const assistantMsg: Message = {
         role: "assistant",
-        text: statusMsg,
+        text: statusMsg + fullText,
         time: new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }),
         fileInfo: {
           filename: file.name,
@@ -161,19 +294,20 @@ function App() {
           preview,
           chunksCount: data.chunksCount,
           textLength: data.textLength,
-          approxTokens: data.metadata?.approxTokens
+          approxTokens: data.metadata?.approxTokens,
+          extractedText: data.extractedText
         },
         metadata: {
           chunksCount: data.chunksCount,
           textLength: data.textLength
         }
       };
-      setMessages((m) => [...m, assistantMsg]);
+      updateCurrentChat([...messages, assistantMsg]);
       setFile(null);
       setImagePreview(null);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      setMessages((m) => [...m, { role: "assistant", text: `Error: ${errorMsg}`, time: new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }) }]);
+      updateCurrentChat([...messages, { role: "assistant", text: `Error: ${errorMsg}`, time: new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }) }]);
     } finally {
       setUploading(false);
     }
@@ -183,6 +317,9 @@ function App() {
     setMessages([]);
     setQuestion("");
     setFile(null);
+    if (activeChat) {
+      localStorage.removeItem(`chat_messages_${activeChat}`);
+    }
   }
 
   function removeFile() {
@@ -228,31 +365,47 @@ function App() {
   }
 
   return (
-    <div className="chat-root">
-      <ChatHeader onClearChat={clearChat} />
-
-      <SettingsBar useLightRAG={useLightRAG} onToggleLightRAG={setUseLightRAG} />
-
-      <ChatMessages messages={messages} loading={loading} />
-
-      <ChatInput
-        question={question}
-        setQuestion={setQuestion}
-        file={file}
-        setFile={setFile}
-        loading={loading}
-        imagePreview={imagePreview}
-        setImagePreview={setImagePreview}
-        uploading={uploading}
-        onSend={send}
-        onUpload={uploadFile}
-        onRemoveFile={removeFile}
-        onPasteImage={handlePasteImage}
-        onKeyPress={handleKeyPress}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
+    <div className="app-layout">
+      <Sidebar
+        chats={chats}
+        activeChat={activeChat}
+        onSelectChat={(chatId) => {
+          setActiveChat(chatId);
+          loadChatMessages(chatId);
+          setSidebarOpen(false);
+        }}
+        onNewChat={createNewChat}
+        onDeleteChat={deleteChat}
+        isOpen={sidebarOpen}
+        onToggle={() => setSidebarOpen(!sidebarOpen)}
       />
+
+      <div className="chat-root">
+        <ChatHeader onClearChat={clearChat} />
+
+        <SettingsBar useLightRAG={useLightRAG} onToggleLightRAG={setUseLightRAG} />
+
+        <ChatMessages messages={messages} loading={loading} />
+
+        <ChatInput
+          question={question}
+          setQuestion={setQuestion}
+          file={file}
+          setFile={setFile}
+          loading={loading}
+          imagePreview={imagePreview}
+          setImagePreview={setImagePreview}
+          uploading={uploading}
+          onSend={send}
+          onUpload={uploadFile}
+          onRemoveFile={removeFile}
+          onPasteImage={handlePasteImage}
+          onKeyPress={handleKeyPress}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        />
+      </div>
     </div>
   );
 }

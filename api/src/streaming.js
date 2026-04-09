@@ -10,8 +10,8 @@ const STREAM_TIMEOUT = 30000; // 30 segundos máximo
 
 export async function streamOpenAIResponse(context, question, onChunk) {
   const systemPrompt = context
-    ? `You are a helpful AI assistant. Use the following context to answer questions accurately. If the context is not relevant or insufficient, supplement with your general knowledge. Respond in the same language as the question. Use markdown formatting for better readability.\n\nContext:\n${context}`
-    : "You are a helpful AI assistant. Answer questions accurately and comprehensively. Respond in the same language as the question. Use markdown formatting when appropriate.";
+    ? `You are a document analysis assistant. Answer questions based ONLY on the provided context from uploaded documents. If the information is not available in the context, respond with "No se encontró información relevante en los documentos subidos." Do not use external knowledge or make assumptions. Respond in the same language as the question. Use markdown formatting for better readability.\n\nContext:\n${context}`
+    : "You are a document analysis assistant. Since no documents have been uploaded or found, I cannot provide information. Please upload documents first and then ask questions about their content.";
 
   const stream = await client.chat.completions.create({
     model: 'gpt-3.5-turbo',
@@ -40,8 +40,8 @@ export async function streamOpenAIResponse(context, question, onChunk) {
 
 export async function streamDeepSeekResponse(context, question, onChunk) {
   const systemPrompt = context
-    ? `You are a helpful AI assistant. Use the following context to answer questions accurately. If the context is not relevant or insufficient, supplement with your general knowledge. Respond in the same language as the question. Use markdown formatting for better readability.\n\nContext:\n${context}`
-    : "You are a helpful AI assistant. Answer questions accurately and comprehensively. Respond in the same language as the question. Use markdown formatting when appropriate.";
+    ? `You are a document analysis assistant. Answer questions based ONLY on the provided context from uploaded documents. If the information is not available in the context, respond with "No se encontró información relevante en los documentos subidos." Do not use external knowledge or make assumptions. Respond in the same language as the question. Use markdown formatting for better readability.\n\nContext:\n${context}`
+    : "You are a document analysis assistant. Since no documents have been uploaded or found, I cannot provide information. Please upload documents first and then ask questions about their content.";
 
   const payload = {
     model: 'deepseek-chat',

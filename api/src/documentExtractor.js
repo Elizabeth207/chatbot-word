@@ -2,6 +2,8 @@ import pdf from 'pdf-parse';
 import mammoth from 'mammoth';
 import XLSX from 'xlsx';
 import Tesseract from 'tesseract.js';
+import pkg from 'pdf2pic';
+const { pdf2pic } = pkg;
 import fs from 'fs';
 import path from 'path';
 import { createReadStream, writeFileSync, unlinkSync } from 'fs';
@@ -9,25 +11,108 @@ import unzipper from 'unzipper';
 
 export async function extractFromPDF(buffer) {
   try {
+    console.log(`📄 Extrayendo PDF con pdf-parse...`);
     const data = await pdf(buffer);
     let text = data.text || '';
 
+    console.log(`   → Texto extraído: ${text.length} caracteres`);
+    
+    // Si el PDF tiene muy poco texto, probablemente sea escaneado
     const lineCount = text.split('\n').length;
-    if (lineCount < 5 && data.numpages > 0) {
-      console.log('PDF detectado como imagen/escaneado, aplicando OCR...');
-      text = await extractFromPDFWithOCR(buffer);
+    const meaningfulText = text.trim().replace(/\s+/g, ' ');
+    
+    if (meaningfulText.length < 50 && data.numpages > 0) {
+      console.warn(`⚠️  PDF tiene muy poco texto seleccionable (${meaningfulText.length} chars, ${data.numpages} páginas)`);
+      console.log(`🔄 Aplicando OCR a todas las páginas...`);
+      text = await extractFromPDFWithOCR(buffer, data.numpages);
     }
 
     return text;
   } catch (err) {
-    console.error('Error en extractFromPDF:', err);
+    console.error('❌ Error en extractFromPDF:', err.message);
     throw new Error(`Failed to extract PDF: ${err.message}`);
   }
 }
 
-async function extractFromPDFWithOCR(buffer) {
-  console.warn('OCR en PDF requiere pdf2image + tesseract, usando fallback...');
-  return 'PDF with images detected. Please implement full PDF OCR pipeline.';
+async function extractFromPDFWithOCR(buffer, numpages) {
+  try {
+    console.log(`🔤 Iniciando OCR con Tesseract para ${numpages} páginas...`);
+    
+    // Crear archivo temporal con el PDF
+    const tempPdfPath = `./temp_pdf_${Date.now()}.pdf`;
+    writeFileSync(tempPdfPath, buffer);
+    
+    try {
+      // Convertir PDF a imágenes usando pdf2pic
+      const options = {
+        density: 200, // DPI
+        saveFilename: 'page',
+        savePath: './temp_images',
+        format: 'png',
+        width: 1024,
+        height: 1024
+      };
+      
+      console.log(`   🔄 Convirtiendo PDF a imágenes...`);
+      const converter = pdf2pic(options);
+      const result = await converter.bulk('-png', tempPdfPath, false);
+      
+      // Procesar cada imagen con OCR
+      let allText = '';
+      const files = fs.readdirSync('./temp_images').filter(f => f.endsWith('.png')).sort();
+      
+      for (let i = 0; i < files.length; i++) {
+        const imgPath = path.join('./temp_images', files[i]);
+        console.log(`   📖 Procesando imagen ${i + 1}/${files.length}...`);
+        
+        try {
+          const imgBuffer = fs.readFileSync(imgPath);
+          const { data: { text } } = await Tesseract.recognize(imgBuffer, 'spa+eng', {
+            logger: (m) => {
+              if (m.status === 'recognizing' && Math.round(m.progress * 100) % 20 === 0) {
+                console.log(`      OCR Progress: ${Math.round(m.progress * 100)}%`);
+              }
+            }
+          });
+          
+          if (text && text.trim().length > 0) {
+            allText += text + '\n\n---\n\n';
+            console.log(`      ✓ Imagen ${i + 1}: ${text.length} caracteres`);
+          }
+          
+          // Limpiar imagen temporal
+          try { unlinkSync(imgPath); } catch (e) {}
+        } catch (imgErr) {
+          console.warn(`   ⚠️  Error OCR en imagen ${i + 1}: ${imgErr.message}`);
+        }
+      }
+      
+      // Limpiar carpeta temporal
+      try {
+        fs.rmSync('./temp_images', { recursive: true, force: true });
+      } catch (e) {}
+      
+      if (allText.trim().length > 20) {
+        console.log(`✅ OCR completado: ${allText.length} caracteres extraídos`);
+        return allText;
+      }
+      
+      console.warn(`⚠️  OCR devolvió texto muy corto: ${allText?.length || 0} caracteres`);
+      return allText || 'PDF extraction with OCR produced minimal content.';
+      
+    } catch (convErr) {
+      // Fallback si pdf2pic falla (probablemente poppler no instalado)
+      console.warn(`⚠️  pdf2pic falló: ${convErr.message}`);
+      console.log(`   💡 Intenta instalar poppler (Windows: descargarlo y agregarlo a PATH)`);
+      return `[OCR Error] Necesita Poppler instalado para procesar este PDF. Error: ${convErr.message}`;
+    } finally {
+      // Limpiar archivo temporal
+      try { unlinkSync(tempPdfPath); } catch (e) {}
+    }
+  } catch (ocrErr) {
+    console.error('❌ Error en OCR:', ocrErr.message);
+    return `[PDF OCR Error] ${ocrErr.message}`;
+  }
 }
 
 export async function extractFromDOCX(buffer) {
@@ -134,36 +219,42 @@ export async function extractTextFromFile(buffer, filename) {
   const ext = path.extname(filename).toLowerCase();
   const mimetype = filename.split('.').pop().toLowerCase();
 
-  console.log(`Extrayendo texto de: ${filename} (tipo: ${ext})`);
+  console.log(`\n📥 Extrayendo texto de: ${filename} (tipo: ${ext})`);
 
   try {
+    let extractedText = '';
+
     if (ext === '.pdf' || mimetype === 'pdf') {
-      return await extractFromPDF(buffer);
-    }
-    if (ext === '.docx' || mimetype === 'docx') {
-      return await extractFromDOCX(buffer);
-    }
-    if (ext === '.doc') {
-      return await extractFromDOCX(buffer);
-    }
-    if (ext === '.xlsx' || ext === '.xls') {
-      return await extractFromXLSX(buffer);
-    }
-    if (ext === '.pptx' || ext === '.ppt') {
-      return await extractFromPPTX(buffer);
-    }
-
-    if (['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(ext)) {
-      return await extractFromImage(buffer, filename);
+      extractedText = await extractFromPDF(buffer);
+    } else if (ext === '.docx' || mimetype === 'docx') {
+      extractedText = await extractFromDOCX(buffer);
+    } else if (ext === '.doc') {
+      extractedText = await extractFromDOCX(buffer);
+    } else if (ext === '.xlsx' || ext === '.xls') {
+      extractedText = await extractFromXLSX(buffer);
+    } else if (ext === '.pptx' || ext === '.ppt') {
+      extractedText = await extractFromPPTX(buffer);
+    } else if (['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(ext)) {
+      extractedText = await extractFromImage(buffer, filename);
+    } else if (['.txt', '.md', '.markdown'].includes(ext)) {
+      extractedText = buffer.toString('utf-8');
+    } else {
+      extractedText = buffer.toString('utf-8');
     }
 
-    if (['.txt', '.md', '.markdown'].includes(ext)) {
-      return buffer.toString('utf-8');
+    // Validar que tenemos contenido útil
+    const cleanText = extractedText.trim();
+    const meaningfulLength = cleanText.replace(/\s+/g, ' ').length;
+
+    if (!cleanText || meaningfulLength < 20) {
+      console.error(`❌ El archivo devolvió contenido muy corto: ${meaningfulLength} caracteres útiles`);
+      throw new Error(`File extraction failed or returned empty content for ${filename}. Got only ${meaningfulLength} meaningful characters.`);
     }
 
-    return buffer.toString('utf-8');
+    console.log(`✅ Extracción exitosa: ${extractedText.length} caracteres, ${meaningfulLength} caracteres útiles\n`);
+    return extractedText;
   } catch (err) {
-    console.error(`Error extrayendo texto de ${filename}:`, err);
+    console.error(`❌ Error extrayendo texto de ${filename}:`, err.message);
     throw err;
   }
 }

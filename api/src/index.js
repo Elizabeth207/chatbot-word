@@ -19,10 +19,16 @@ const sessionStates = new Map();
 function getSessionState(sessionId = 'default') {
   if (!sessionStates.has(sessionId)) {
     sessionStates.set(sessionId, {
+      // Estado antiguo (mantenido para compatibilidad)
       activeDocument: null,
       lastImageText: null,
       lastPdfContent: null,
-      lastPdfMetadata: null
+      lastPdfMetadata: null,
+      
+      // Estado universal - NUEVO
+      lastDocumentContent: null,
+      lastDocumentMetadata: null,
+      lastDocumentFilename: null
     });
   }
   return sessionStates.get(sessionId);
@@ -184,10 +190,14 @@ app.post("/query", async (req, res) => {
     const { question, k = 4, collection: collectionName = "documents", useLightRAG = true, sessionId = 'default' } = req.body;
     if (!question) return res.status(400).json({ error: "question required" });
 
+    console.log(`\n🔍 [/query] Nueva pregunta: "${question}" (sessionId: ${sessionId})`);
+    
     const sessionState = getSessionState(sessionId);
+    console.log(`📊 Estado de sesión: activeDocument = ${sessionState.activeDocument}`);
 
     const intent = detectIntent(question);
     if (intent === "conversation") {
+      console.log(`💬 Detectado como conversación`);
       const response = getConversationalResponse(question);
       const stream = setupStreamingResponse(res);
       stream.sendChunk(response);
@@ -198,7 +208,38 @@ app.post("/query", async (req, res) => {
     const stream = setupStreamingResponse(res);
 
     try {
+      // 🆕 PRIORIDAD 1: USAR ESTADO UNIVERSAL DEL DOCUMENTO
+      if (sessionState.lastDocumentContent && sessionState.lastDocumentContent.trim().length > 20) {
+        console.log(`✅ USANDO ESTADO UNIVERSAL: ${sessionState.lastDocumentFilename}`);
+        console.log(`   Contenido: ${sessionState.lastDocumentContent.length} caracteres`);
+        
+        const documentContext = `Contenido del documento ${sessionState.lastDocumentFilename}:\n\n${sessionState.lastDocumentContent}`;
+        await generateStreamingMarkdownResponse(
+          documentContext,
+          question,
+          true,
+          (token) => stream.sendChunk(token)
+        );
+        stream.sendComplete({
+          context: documentContext,
+          docs: [{ 
+            content: sessionState.lastDocumentContent, 
+            metadata: { 
+              source: 'active_document_universal',
+              filename: sessionState.lastDocumentFilename,
+              ...sessionState.lastDocumentMetadata 
+            } 
+          }],
+          usedLightRAG: false,
+          intent: "query_active_document_universal"
+        });
+        console.log(`✅ Respuesta completada usando estado universal\n`);
+        return;
+      }
+
+      // PRIORIDAD 2: ESTADOS LEGADOS (para compatibilidad)
       if (sessionState.activeDocument === 'image' && sessionState.lastImageText) {
+        console.log(`✅ Usando documento ACTIVO de sesión: IMAGEN`);
         const imageContext = `Texto extraído de la imagen:\n${sessionState.lastImageText}`;
         await generateStreamingMarkdownResponse(
           imageContext,
@@ -212,10 +253,12 @@ app.post("/query", async (req, res) => {
           usedLightRAG: false,
           intent: "query_active_image"
         });
+        console.log(`✅ Respuesta completada para imagen activa\n`);
         return;
       }
 
       if (sessionState.activeDocument === 'pdf' && sessionState.lastPdfContent) {
+        console.log(`✅ Usando documento ACTIVO de sesión: PDF`);
         const pdfContext = `Contenido del documento PDF:\n${sessionState.lastPdfContent}`;
         await generateStreamingMarkdownResponse(
           pdfContext,
@@ -229,53 +272,39 @@ app.post("/query", async (req, res) => {
           usedLightRAG: false,
           intent: "query_active_pdf"
         });
+        console.log(`✅ Respuesta completada para PDF activo\n`);
         return;
       }
+      
+      console.log(`⚠️  No hay documento activo en sesión, buscando en ChromaDB...`);
 
       const collection = await getCollection(collectionName);
 
-      const isGeneral = isGeneralQuery(question);
       let docs = [];
       let usedLightRAGActual = useLightRAG;
 
-      if (!isGeneral) {
-        if (useLightRAG) {
-          try {
-            docs = await lightRAGSearch(question, collection, {
-              k,
-              useHybrid: true,
-              rerankByDiversity: false,
-              compressContext: true,
-              maxContextTokens: 2000
-            });
-          } catch (lightragErr) {
-            console.warn("LightRAG fallback a búsqueda estándar:", lightragErr);
-            const qEmb = await embed(question);
-            let results = null;
-            if (typeof collection.query === "function") {
-              results = await collection.query({
-                query_embeddings: [qEmb],
-                n_results: k,
-                include: ["metadatas", "documents"]
-              });
-            } else {
-              throw new Error("Chroma collection query API not found");
-            }
-
-            if (results?.results?.[0]?.documents) {
-              const first = results.results[0];
-              const documents = first.documents || [];
-              docs = documents.map((text, idx) => ({
-                text,
-                metadata: first.metadatas?.[idx] || {}
-              }));
-            }
-          }
-        } else {
+      if (useLightRAG) {
+        try {
+          console.log(`[/query] Buscando con LightRAG para: "${question}"`);
+          docs = await lightRAGSearch(question, collection, {
+            k,
+            useHybrid: true,
+            rerankByDiversity: false,
+            compressContext: true,
+            maxContextTokens: 2000
+          });
+          console.log(`[/query] LightRAG encontró ${docs.length} documentos`);
+        } catch (lightragErr) {
+          console.warn("LightRAG fallback a búsqueda estándar:", lightragErr.message);
           const qEmb = await embed(question);
+          console.log(`[/query] Embedding generado, buscando con query directo...`);
           let results = null;
           if (typeof collection.query === "function") {
-            results = await collection.query({ query_embeddings: [qEmb], n_results: k, include: ["metadatas", "documents"] });
+            results = await collection.query({
+              query_embeddings: [qEmb],
+              n_results: k,
+              include: ["metadatas", "documents"]
+            });
           } else {
             throw new Error("Chroma collection query API not found");
           }
@@ -288,9 +317,25 @@ app.post("/query", async (req, res) => {
               metadata: first.metadatas?.[idx] || {}
             }));
           }
+          console.log(`[/query] Búsqueda directa encontró ${docs.length} documentos`);
         }
       } else {
-        usedLightRAGActual = false;
+        const qEmb = await embed(question);
+        let results = null;
+        if (typeof collection.query === "function") {
+          results = await collection.query({ query_embeddings: [qEmb], n_results: k, include: ["metadatas", "documents"] });
+        } else {
+          throw new Error("Chroma collection query API not found");
+        }
+
+        if (results?.results?.[0]?.documents) {
+          const first = results.results[0];
+          const documents = first.documents || [];
+          docs = documents.map((text, idx) => ({
+            text,
+            metadata: first.metadatas?.[idx] || {}
+          }));
+        }
       }
 
       const context = docs.slice(0, k).map(d => d.text).join("\n\n---\n\n");
@@ -323,23 +368,29 @@ app.post("/query", async (req, res) => {
 app.get("/debug/docs", async (req, res) => {
   try {
     const collection = await getCollection("documents");
+    console.log(`[debug/docs] Buscando documentos...`);
+    
     if (typeof collection.get === "function") {
       const all = await collection.get();
-      return res.json({ source: "chroma.get", data: all });
+      console.log(`[debug/docs] Encontrados ${all.ids?.length || 0} documentos`);
+      
+      const data = all.ids?.map((id, i) => ({
+        id,
+        textLength: all.documents?.[i]?.length || 0,
+        textPreview: all.documents?.[i]?.substring(0, 300) || "(vacío)",
+        embeddingLength: all.embeddings?.[i]?.length || 0,
+        metadata: all.metadatas?.[i]
+      })) || [];
+      
+      return res.json({ 
+        source: "in-memory", 
+        count: all.ids?.length || 0,
+        totalChars: all.documents?.reduce((sum, d) => sum + (d?.length || 0), 0) || 0,
+        data
+      });
     }
 
-    if (typeof collection.list === "function") {
-      const all = await collection.list();
-      return res.json({ source: "chroma.list", data: all });
-    }
-
-    if (collection && collection.documents && Array.isArray(collection.documents)) {
-      const items = collection.documents.map((d, i) => ({ id: collection.ids?.[i] ?? i, text: d, metadata: collection.metadatas?.[i] ?? {} }));
-      return res.json({ source: "in-memory", data: items });
-    }
-
-    const maybe = { documents: collection.documents || null, ids: collection.ids || null, metadatas: collection.metadatas || null };
-    res.json({ source: "unknown-client", data: maybe });
+    return res.json({ source: "unknown", data: [], count: 0 });
   } catch (err) {
     console.error("/debug/docs error", err);
     res.status(500).json({ error: err.message || String(err) });
@@ -358,71 +409,104 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     const originalName = req.file.originalname;
     const buf = req.file.buffer;
 
-    console.log(`Processing upload: ${originalName} (${buf.length} bytes)`);
+    console.log(`\n📁 [/upload] Procesando archivo: ${originalName} (${buf.length} bytes)`);
 
     let text = "";
     try {
       text = await extractTextFromFile(buf, originalName);
     } catch (extractErr) {
-      console.error("Extraction error:", extractErr);
+      console.error("❌ Error extrayendo:", extractErr.message);
       return res.status(400).json({ 
         error: `Could not extract text from ${originalName}: ${extractErr.message}` 
       });
     }
 
     if (!text || !text.trim()) {
+      console.error("❌ El archivo está vacío después de extraer");
       return res.status(400).json({ error: "could not extract text from file" });
     }
 
-    // Guardar el texto completo sin chunking para mejor recuperación
-    const chunks = [{ text, tokens: Math.ceil(text.length / 4) }];
-
-    console.log(`Extracted: ${text.length} chars, guardando como documento completo`);
+    console.log(`✅ Extracción completada: ${text.length} caracteres`);
 
     const metadata = getDocumentMetadata(originalName, text);
+    const isImageFile = /\.(png|jpe?g|gif|webp|bmp|tiff?)$/i.test(originalName) || req.file.mimetype.startsWith("image/");
 
+    // Generar embedding
+    console.log(`⚙️  Generando embedding para búsqueda...`);
+    let embedding;
+    try {
+      embedding = await embed(text);
+      if (!embedding || !Array.isArray(embedding) || embedding.length === 0) {
+        throw new Error("Embedding inválido");
+      }
+      console.log(`✅ Embedding generado: ${embedding.length} dimensiones`);
+    } catch (embedErr) {
+      console.error("❌ Error en embedding:", embedErr.message);
+      return res.status(500).json({ error: `Error generating embedding: ${embedErr.message}` });
+    }
+
+    // Indexar en la colección
+    console.log(`📊 Indexando en ChromaDB...`);
     const ids = [originalName];
     const documents = [text];
     const metadatas = [{
       ...metadata,
       tokens: Math.ceil(text.length / 4),
       uploadedAt: new Date().toISOString(),
-      isCompleteText: true
+      isCompleteText: true,
+      documentType: isImageFile ? 'image' : 'pdf'
     }];
-    const embeddings = [await embed(text)];
+    const embeddings = [embedding];
 
     const collection = await getCollection("documents");
 
-    if (typeof collection.upsert === "function") {
-      await collection.upsert({ ids, documents, metadatas, embeddings });
-    } else if (typeof collection.add === "function") {
-      await collection.add({ ids, documents, metadatas, embeddings });
-    } else {
-      return res.status(500).json({ error: "collection add/upsert not available" });
+    try {
+      if (typeof collection.upsert === "function") {
+        await collection.upsert({ ids, documents, metadatas, embeddings });
+      } else if (typeof collection.add === "function") {
+        await collection.add({ ids, documents, metadatas, embeddings });
+      } else {
+        throw new Error("Colección sin método add/upsert");
+      }
+      console.log(`✅ Documento indexado en colección`);
+    } catch (indexErr) {
+      console.error("❌ Error indexando:", indexErr.message);
+      return res.status(500).json({ error: `Error indexing document: ${indexErr.message}` });
     }
 
-    const isImageFile = /\.(png|jpe?g|gif|webp|bmp|tiff?)$/i.test(originalName) || req.file.mimetype.startsWith("image/");
+    // Guardar en sessionState como documento activo
     if (isImageFile) {
       sessionState.activeDocument = 'image';
       sessionState.lastImageText = text;
       sessionState.lastImageMetadata = metadata;
+      console.log(`📸 Documento activo: IMAGEN`);
     } else {
       sessionState.activeDocument = 'pdf';
       sessionState.lastPdfContent = text;
       sessionState.lastPdfMetadata = metadata;
+      console.log(`📄 Documento activo: PDF/DOCUMENTO`);
     }
+
+    // 🆕 GUARDAR EN ESTADO UNIVERSAL
+    sessionState.lastDocumentContent = text;
+    sessionState.lastDocumentMetadata = metadata;
+    sessionState.lastDocumentFilename = originalName;
+    
+    console.log(`🎯 Documento guardado en estado universal (${text.length} caracteres)`);
+    console.log(`✅ [/upload] Completado exitosamente\n`);
 
     res.json({
       ok: true,
-      inserted: ids.length,
+      inserted: 1,
       id: originalName,
       textLength: text.length,
-      chunksCount: 1, // Siempre 1 documento completo
+      chunksCount: 1,
       metadata,
-      isCompleteText: true
+      isCompleteText: true,
+      extractedText: text
     });
   } catch (err) {
-    console.error("/upload error", err);
+    console.error("❌ /upload error:", err.message);
     res.status(500).json({ error: err.message || String(err) });
   }
 });
@@ -488,6 +572,72 @@ app.post("/query-multimodal", upload.single("image"), async (req, res) => {
 
     let extractedImageText = "";
     let imageProcessingInfo = {};
+    let isUploadedImage = false;
+
+    if (req.file) {
+      const filename = req.file.originalname || "";
+      const isImageFile = /\.(png|jpe?g|gif|webp|bmp|tiff?)$/i.test(filename) || req.file.mimetype.startsWith("image/");
+      isUploadedImage = isImageFile;
+
+      try {
+        extractedImageText = await extractTextFromFile(req.file.buffer, filename);
+        const metadata = getDocumentMetadata(filename, extractedImageText);
+        imageProcessingInfo = {
+          filename,
+          size: req.file.size,
+          textExtracted: extractedImageText.length,
+          tokens: Math.ceil(extractedImageText.length / 4)
+        };
+
+        if (isImageFile) {
+          sessionState.activeDocument = 'image';
+          sessionState.lastImageText = extractedImageText;
+          sessionState.lastImageMetadata = metadata;
+        } else {
+          sessionState.activeDocument = 'pdf';
+          sessionState.lastPdfContent = extractedImageText;
+          sessionState.lastPdfMetadata = metadata;
+        }
+
+        // 🔥 GUARDAR EN COLECCIÓN PARA QUE SE PUEDA BUSCAR
+        const collection = await getCollection("documents");
+        const docId = filename;
+        const emb = await embed(extractedImageText);
+        
+        console.log(`[/query-multimodal] Indexando documento "${filename}" en colección...`);
+        
+        if (typeof collection.upsert === "function") {
+          await collection.upsert({
+            ids: [docId],
+            documents: [extractedImageText],
+            metadatas: [{
+              ...metadata,
+              tokens: Math.ceil(extractedImageText.length / 4),
+              uploadedAt: new Date().toISOString(),
+              isCompleteText: true
+            }],
+            embeddings: [emb]
+          });
+        } else if (typeof collection.add === "function") {
+          await collection.add({
+            ids: [docId],
+            documents: [extractedImageText],
+            metadatas: [{
+              ...metadata,
+              tokens: Math.ceil(extractedImageText.length / 4),
+              uploadedAt: new Date().toISOString(),
+              isCompleteText: true
+            }],
+            embeddings: [emb]
+          });
+        }
+        
+        console.log(`[/query-multimodal] ✅ Documento "${filename}" indexado correctamente`);
+      } catch (extractErr) {
+        console.error("Error extrayendo texto del archivo:", extractErr);
+        return res.status(500).json({ error: `Error procesando el archivo: ${extractErr.message}` });
+      }
+    }
 
     if (intent === "conversation" && !req.file) {
       const response = getConversationalResponse(question);
@@ -600,27 +750,24 @@ app.post("/query-multimodal", upload.single("image"), async (req, res) => {
       });
     }
 
-    if (req.file) {
-      sessionState.activeDocument = 'image';
-      sessionState.lastImageText = extractedImageText;
-    }
-
-    const combinedContext = extractedImageText ? `${question}\n\n---\n\nTexto extraído de imagen:\n${extractedImageText}` : question;
+    const combinedContext = extractedImageText ? `${question}\n\n---\n\nTexto extraído del archivo:\n${extractedImageText}` : question;
 
     const collection = await getCollection("documents");
 
     let docs = [];
     if (useLightRAG) {
       try {
-        docs = await lightRAGSearch(combinedContext, collection, {
+        console.log(`[/query-multimodal] Buscando en colección con LightRAG...`);
+        docs = await lightRAGSearch(question, collection, {
           k,
           useHybrid: true,
           rerankByDiversity: false,
           compressContext: true,
           maxContextTokens: 2000
         });
+        console.log(`[/query-multimodal] LightRAG encontró ${docs.length} documentos`);
       } catch (lightragErr) {
-        console.warn("LightRAG fallback:", lightragErr);
+        console.warn("LightRAG fallback:", lightragErr.message);
         const qEmb = await embed(question);
         const results = await collection.query({
           query_embeddings: [qEmb],
@@ -636,6 +783,7 @@ app.post("/query-multimodal", upload.single("image"), async (req, res) => {
             metadata: first.metadatas?.[idx] || {}
           }));
         }
+        console.log(`[/query-multimodal] Búsqueda directa encontró ${docs.length} documentos`);
       }
     } else {
       const qEmb = await embed(question);
