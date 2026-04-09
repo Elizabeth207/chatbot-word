@@ -1,53 +1,40 @@
 import dotenv from "dotenv";
 import OpenAI from "openai";
-import { OpenAIEmbeddings } from "@langchain/openai";
 
 dotenv.config();
 
-let useMockEmbeddings = !process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY.startsWith("mock");
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim();
+const useMockEmbeddingsByDefault = !OPENAI_API_KEY || OPENAI_API_KEY.toLowerCase().startsWith("mock");
 
-let client;
-let lcEmbeddings;
-if (!useMockEmbeddings) {
+let client = null;
+if (!useMockEmbeddingsByDefault) {
   try {
-    client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    lcEmbeddings = new OpenAIEmbeddings({ openAIApiKey: process.env.OPENAI_API_KEY });
+    client = new OpenAI({ apiKey: OPENAI_API_KEY });
   } catch (err) {
-    console.warn("No se pudo inicializar OpenAI, usando embeddings mock...");
-    useMockEmbeddings = true;
+    console.warn("No se pudo inicializar OpenAI, embeddings mock en este proceso:", err.message || err);
   }
+}
+
+function createMockEmbedding(text) {
+  const hash = Array.from(text).reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0);
+  return Array.from({ length: 1536 }, (_, i) => Math.sin(hash + i));
 }
 
 export async function embed(text) {
   if (!text) return [];
-  if (useMockEmbeddings) {
-    const hash = Array.from(text).reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0);
-    const vec = [];
-    for (let i = 0; i < 1536; i++) {
-      vec.push(Math.sin(hash + i));
-    }
-    return vec;
+  if (!client) {
+    return createMockEmbedding(text);
   }
 
   try {
-    if (lcEmbeddings) {
-      return await lcEmbeddings.embedQuery(text);
-    }
     const resp = await client.embeddings.create({
       model: "text-embedding-3-small",
       input: text,
     });
     return resp.data[0].embedding;
   } catch (err) {
-    console.warn("Error en OpenAI API, usando embeddings mock. Error:", err.code || err.message);
-    useMockEmbeddings = true;
-
-    const hash = Array.from(text).reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0);
-    const vec = [];
-    for (let i = 0; i < 1536; i++) {
-      vec.push(Math.sin(hash + i));
-    }
-    return vec;
+    console.warn("Error en OpenAI API para embeddings, fallback mock solo para esta petición:", err.code || err.message);
+    return createMockEmbedding(text);
   }
 }
 
