@@ -10,8 +10,8 @@ export async function generateAnswer(context, question) {
   }
 
   const systemPrompt = context && context.trim().length > 0
-    ? `You are a document analysis assistant. Answer questions based ONLY on the provided context from uploaded documents. If the information is not available in the context, respond with "No se encontró información relevante en los documentos subidos." Do not use external knowledge or make assumptions. Respond in the same language as the question. Use markdown formatting for better readability.\n\nContext:\n${context}`
-    : "You are a document analysis assistant. Since no documents have been uploaded or found, I cannot provide information. Please upload documents first and then ask questions about their content.";
+    ? `You are a helpful document analysis assistant. When answering questions, prioritize information from the uploaded documents provided in the context. If the question can be answered using the document context, use that information. For questions that cannot be fully answered from the documents, or for general knowledge questions, you may use your general knowledge to provide helpful responses. Always respond in the same language as the question and use markdown formatting for better readability.\n\nContext from uploaded documents:\n${context}`
+    : "You are a helpful AI assistant. You can answer general questions, provide information on various topics, and help with document analysis when documents are uploaded. Respond in the same language as the question and use markdown formatting for better readability.";
 
   const payload = {
     model: "deepseek-chat",

@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import './Sidebar.css';
 import { TrashIcon, PlusIcon, MenuIcon } from './Icons';
+import { ConfirmDialog } from './ConfirmDialog';
 
 export type Chat = {
   id: string;
@@ -18,8 +20,38 @@ interface SidebarProps {
 }
 
 export function Sidebar({ chats, activeChat, onSelectChat, onNewChat, onDeleteChat, isOpen, onToggle }: SidebarProps) {
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  const handleDeleteClick = (chatId: string) => {
+    setDeleteConfirm(chatId);
+  };
+
+  const handleConfirmDelete = () => {
+    if (deleteConfirm) {
+      onDeleteChat(deleteConfirm);
+      setDeleteConfirm(null);
+    }
+  };
+
+  const handleCancelDelete = () => {
+    setDeleteConfirm(null);
+  };
+
+  const chartToDelete = deleteConfirm ? chats.find(c => c.id === deleteConfirm) : null;
+
   return (
     <>
+      <ConfirmDialog
+        isOpen={!!deleteConfirm}
+        title="Eliminar chat"
+        message={`¿Eliminar "${chartToDelete?.title}"? Esta acción no se puede deshacer.`}
+        confirmText="Eliminar"
+        cancelText="Cancelar"
+        onConfirm={handleConfirmDelete}
+        onCancel={handleCancelDelete}
+        isDangerous={true}
+      />
+
       {/* Mobile Menu Button */}
       <button className="sidebar-toggle" onClick={onToggle}>
         <MenuIcon />
@@ -66,9 +98,7 @@ export function Sidebar({ chats, activeChat, onSelectChat, onNewChat, onDeleteCh
                       className="delete-btn"
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (confirm('¿Eliminar este chat?')) {
-                          onDeleteChat(chat.id);
-                        }
+                        handleDeleteClick(chat.id);
                       }}
                       title="Eliminar chat"
                     >

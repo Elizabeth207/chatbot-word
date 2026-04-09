@@ -1,6 +1,36 @@
+import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
+import fs from "fs";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Cargar .env manualmente si dotenv no funciona
+const envPath = path.resolve(__dirname, '../.env');
+if (fs.existsSync(envPath)) {
+  const envContent = fs.readFileSync(envPath, 'utf8');
+  const envLines = envContent.split('\n');
+  for (const line of envLines) {
+    const trimmed = line.trim();
+    if (trimmed && !trimmed.startsWith('#')) {
+      const [key, ...valueParts] = trimmed.split('=');
+      if (key && valueParts.length > 0) {
+        const value = valueParts.join('=').trim();
+        process.env[key.trim()] = value;
+      }
+    }
+  }
+}
+
+// Verificar que las claves se carguen correctamente
+console.log("🔑 OPENAI KEY:", process.env.OPENAI_API_KEY?.slice(0, 15));
+console.log("🔑 DEEPSEEK KEY:", process.env.DEEPSEEK_API_KEY?.slice(0, 15));
+console.log("INDEX Env file path:", envPath);
+console.log("INDEX Env file exists:", fs.existsSync(envPath));
+
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
 import { embed } from "./openaiClient.js";
 import { getCollection } from "./chromaClient.js";
 import { generateAnswer } from "./deepseek.js";
@@ -9,8 +39,6 @@ import { extractTextFromFile, getDocumentMetadata } from "./documentExtractor.js
 import { lightRAGSearch } from "./lightrag.js";
 import { generateStreamingMarkdownResponse, setupStreamingResponse } from "./streaming.js";
 import multer from "multer";
-
-dotenv.config();
 
 const PORT = process.env.PORT || 3000;
 
@@ -207,104 +235,80 @@ app.post("/query", async (req, res) => {
 
     const stream = setupStreamingResponse(res);
 
+    const formattedQuestion = (/^\s*hola\b/i.test(question))
+      ? `Responde con un saludo breve y amigable, usando emojis si lo deseas y en formato markdown. ${question}`
+      : `Por favor responde de manera clara y organizada EN MARKDOWN. Usa headings (##), **negrita**, *cursiva*, listas - bullet, 1. numeradas según corresponda. ${question}`;
+
     try {
-      // 🆕 PRIORIDAD 1: USAR ESTADO UNIVERSAL DEL DOCUMENTO
-      if (sessionState.lastDocumentContent && sessionState.lastDocumentContent.trim().length > 20) {
-        console.log(`✅ USANDO ESTADO UNIVERSAL: ${sessionState.lastDocumentFilename}`);
-        console.log(`   Contenido: ${sessionState.lastDocumentContent.length} caracteres`);
-        
-        const documentContext = `Contenido del documento ${sessionState.lastDocumentFilename}:\n\n${sessionState.lastDocumentContent}`;
-        await generateStreamingMarkdownResponse(
-          documentContext,
-          question,
-          true,
-          (token) => stream.sendChunk(token)
-        );
-        stream.sendComplete({
-          context: documentContext,
-          docs: [{ 
-            content: sessionState.lastDocumentContent, 
-            metadata: { 
-              source: 'active_document_universal',
-              filename: sessionState.lastDocumentFilename,
-              ...sessionState.lastDocumentMetadata 
-            } 
-          }],
-          usedLightRAG: false,
-          intent: "query_active_document_universal"
-        });
-        console.log(`✅ Respuesta completada usando estado universal\n`);
-        return;
-      }
-
-      // PRIORIDAD 2: ESTADOS LEGADOS (para compatibilidad)
-      if (sessionState.activeDocument === 'image' && sessionState.lastImageText) {
-        console.log(`✅ Usando documento ACTIVO de sesión: IMAGEN`);
-        const imageContext = `Texto extraído de la imagen:\n${sessionState.lastImageText}`;
-        await generateStreamingMarkdownResponse(
-          imageContext,
-          question,
-          true,
-          (token) => stream.sendChunk(token)
-        );
-        stream.sendComplete({
-          context: imageContext,
-          docs: [{ content: sessionState.lastImageText, metadata: { source: 'active_image' } }],
-          usedLightRAG: false,
-          intent: "query_active_image"
-        });
-        console.log(`✅ Respuesta completada para imagen activa\n`);
-        return;
-      }
-
-      if (sessionState.activeDocument === 'pdf' && sessionState.lastPdfContent) {
-        console.log(`✅ Usando documento ACTIVO de sesión: PDF`);
-        const pdfContext = `Contenido del documento PDF:\n${sessionState.lastPdfContent}`;
-        await generateStreamingMarkdownResponse(
-          pdfContext,
-          question,
-          true,
-          (token) => stream.sendChunk(token)
-        );
-        stream.sendComplete({
-          context: pdfContext,
-          docs: [{ content: sessionState.lastPdfContent, metadata: { source: 'active_pdf', ...sessionState.lastPdfMetadata } }],
-          usedLightRAG: false,
-          intent: "query_active_pdf"
-        });
-        console.log(`✅ Respuesta completada para PDF activo\n`);
-        return;
-      }
-      
-      console.log(`⚠️  No hay documento activo en sesión, buscando en ChromaDB...`);
-
-      const collection = await getCollection(collectionName);
-
+      let documentContext = "";
       let docs = [];
       let usedLightRAGActual = useLightRAG;
 
-      if (useLightRAG) {
-        try {
-          console.log(`[/query] Buscando con LightRAG para: "${question}"`);
-          docs = await lightRAGSearch(question, collection, {
-            k,
-            useHybrid: true,
-            rerankByDiversity: false,
-            compressContext: true,
-            maxContextTokens: 2000
-          });
-          console.log(`[/query] LightRAG encontró ${docs.length} documentos`);
-        } catch (lightragErr) {
-          console.warn("LightRAG fallback a búsqueda estándar:", lightragErr.message);
+      if (sessionState.lastDocumentContent && sessionState.lastDocumentContent.trim().length > 20) {
+        documentContext = `Contenido del documento ${sessionState.lastDocumentFilename}:\n\n${sessionState.lastDocumentContent}`;
+        docs.push({
+          text: sessionState.lastDocumentContent,
+          metadata: {
+            source: 'active_document_universal',
+            filename: sessionState.lastDocumentFilename,
+            ...sessionState.lastDocumentMetadata
+          }
+        });
+      } else if (sessionState.activeDocument === 'image' && sessionState.lastImageText) {
+        documentContext = `Texto extraído de la imagen:\n${sessionState.lastImageText}`;
+        docs.push({ text: sessionState.lastImageText, metadata: { source: 'active_image' } });
+      } else if (sessionState.activeDocument === 'pdf' && sessionState.lastPdfContent) {
+        documentContext = `Contenido del documento PDF:\n${sessionState.lastPdfContent}`;
+        docs.push({ text: sessionState.lastPdfContent, metadata: { source: 'active_pdf', ...sessionState.lastPdfMetadata } });
+      }
+
+      let retrievedContext = "";
+      if (!documentContext) {
+        console.log(`⚠️  No hay documento activo en sesión, buscando en ChromaDB...`);
+
+        const collection = await getCollection(collectionName);
+
+        if (useLightRAG) {
+          try {
+            console.log(`[/query] Buscando con LightRAG para: "${question}"`);
+            docs = await lightRAGSearch(question, collection, {
+              k,
+              useHybrid: true,
+              rerankByDiversity: false,
+              compressContext: true,
+              maxContextTokens: 2000
+            });
+            console.log(`[/query] LightRAG encontró ${docs.length} documentos`);
+          } catch (lightragErr) {
+            console.warn("LightRAG fallback a búsqueda estándar:", lightragErr.message);
+            const qEmb = await embed(question);
+            console.log(`[/query] Embedding generado, buscando con query directo...`);
+            let results = null;
+            if (typeof collection.query === "function") {
+              results = await collection.query({
+                query_embeddings: [qEmb],
+                n_results: k,
+                include: ["metadatas", "documents"]
+              });
+            } else {
+              throw new Error("Chroma collection query API not found");
+            }
+
+            if (results?.results?.[0]?.documents) {
+              const first = results.results[0];
+              const documents = first.documents || [];
+              docs = documents.map((text, idx) => ({
+                text,
+                metadata: first.metadatas?.[idx] || {}
+              }));
+            }
+            console.log(`[/query] Búsqueda directa encontró ${docs.length} documentos`);
+          }
+        } else {
           const qEmb = await embed(question);
-          console.log(`[/query] Embedding generado, buscando con query directo...`);
           let results = null;
           if (typeof collection.query === "function") {
-            results = await collection.query({
-              query_embeddings: [qEmb],
-              n_results: k,
-              include: ["metadatas", "documents"]
-            });
+            results = await collection.query({ query_embeddings: [qEmb], n_results: k, include: ["metadatas", "documents"] });
           } else {
             throw new Error("Chroma collection query API not found");
           }
@@ -317,44 +321,27 @@ app.post("/query", async (req, res) => {
               metadata: first.metadatas?.[idx] || {}
             }));
           }
-          console.log(`[/query] Búsqueda directa encontró ${docs.length} documentos`);
-        }
-      } else {
-        const qEmb = await embed(question);
-        let results = null;
-        if (typeof collection.query === "function") {
-          results = await collection.query({ query_embeddings: [qEmb], n_results: k, include: ["metadatas", "documents"] });
-        } else {
-          throw new Error("Chroma collection query API not found");
         }
 
-        if (results?.results?.[0]?.documents) {
-          const first = results.results[0];
-          const documents = first.documents || [];
-          docs = documents.map((text, idx) => ({
-            text,
-            metadata: first.metadatas?.[idx] || {}
-          }));
-        }
+        retrievedContext = docs.slice(0, k).map(d => d.text).join("\n\n---\n\n");
       }
 
-      const context = docs.slice(0, k).map(d => d.text).join("\n\n---\n\n");
-
-      let formattedQuestion;
-      if (/^\s*hola\b/i.test(question)) {
-        formattedQuestion = `Responde con un saludo breve y amigable, usando emojis si lo deseas y en formato markdown. ${question}`;
-      } else {
-        formattedQuestion = `Por favor responde de manera clara y organizada EN MARKDOWN. Usa headings (##), **negrita**, *cursiva*, listas - bullet, 1. numeradas según corresponda. ${question}`;
-      }
+      const contextFinal = [documentContext, retrievedContext].filter(Boolean).join("\n\n---\n\n");
+      const hasContext = contextFinal.trim().length > 10;
 
       await generateStreamingMarkdownResponse(
-        context,
+        contextFinal,
         formattedQuestion,
-        true,
+        hasContext,
         (token) => stream.sendChunk(token)
       );
 
-      stream.sendComplete({ context, docs, usedLightRAG: usedLightRAGActual });
+      stream.sendComplete({
+        context: contextFinal,
+        docs,
+        usedLightRAG: usedLightRAGActual,
+        intent: hasContext ? "query_with_context" : "chatbot_general"
+      });
     } catch (err) {
       stream.sendError(err);
     }
@@ -599,6 +586,13 @@ app.post("/query-multimodal", upload.single("image"), async (req, res) => {
           sessionState.lastPdfMetadata = metadata;
         }
 
+        // 🆕 GUARDAR EN ESTADO UNIVERSAL PARA PREGUNTAS DE SEGUIMIENTO
+        sessionState.lastDocumentContent = extractedImageText;
+        sessionState.lastDocumentMetadata = metadata;
+        sessionState.lastDocumentFilename = filename;
+        
+        console.log(`🎯 Documento "${filename}" guardado en estado universal (${extractedImageText.length} caracteres)`);
+
         // 🔥 GUARDAR EN COLECCIÓN PARA QUE SE PUEDA BUSCAR
         const collection = await getCollection("documents");
         const docId = filename;
@@ -714,7 +708,7 @@ app.post("/query-multimodal", upload.single("image"), async (req, res) => {
 
       const imageContext = `Texto extraído de la imagen:\n${sessionState.lastImageText}`;
       const combinedContext = extractedImageText ? `${imageContext}\n\n---\n\nTexto de nueva imagen:\n${extractedImageText}` : imageContext;
-      const answer = await generateAnswer(question, combinedContext, []);
+      const answer = await generateAnswer(combinedContext, question);
       return res.json({
         answer,
         docs: [{ content: sessionState.lastImageText, metadata: { source: 'active_image' } }],
@@ -739,7 +733,7 @@ app.post("/query-multimodal", upload.single("image"), async (req, res) => {
 
       const pdfContext = `Contenido del documento PDF:\n${sessionState.lastPdfContent}`;
       const combinedContext = extractedImageText ? `${pdfContext}\n\n---\n\nTexto de imagen:\n${extractedImageText}` : pdfContext;
-      const answer = await generateAnswer(question, combinedContext, []);
+      const answer = await generateAnswer(combinedContext, question);
       return res.json({
         answer,
         docs: [{ content: sessionState.lastPdfContent, metadata: { source: 'active_pdf', ...sessionState.lastPdfMetadata } }],
@@ -750,8 +744,7 @@ app.post("/query-multimodal", upload.single("image"), async (req, res) => {
       });
     }
 
-    const combinedContext = extractedImageText ? `${question}\n\n---\n\nTexto extraído del archivo:\n${extractedImageText}` : question;
-
+    const extractedFileContext = extractedImageText ? `Texto extraído del archivo:\n${extractedImageText}` : "";
     const collection = await getCollection("documents");
 
     let docs = [];
@@ -805,16 +798,19 @@ app.post("/query-multimodal", upload.single("image"), async (req, res) => {
 
     const context = docs.slice(0, k).map(d => d.text).join("\n\n---\n\n");
 
-    const formattedQuestion = `👤 Usuario: ${question}${extractedImageText ? '\n\n📋 De la imagen adjunta: ' + extractedImageText.substring(0, 200) + '...' : ''}`;
+    const finalContext = [
+      extractedFileContext,
+      context
+    ].filter(Boolean).join("\n\n---\n\n");
 
-    const answer = await generateAnswer(formattedQuestion, context, true);
+    const answer = await generateAnswer(finalContext, question);
 
     res.json({
       answer,
       docs,
       usedLightRAG: true,
       imageInfo: imageProcessingInfo,
-      context
+      context: finalContext
     });
   } catch (err) {
     console.error("/query-multimodal error:", err);

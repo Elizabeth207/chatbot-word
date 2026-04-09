@@ -9,7 +9,7 @@ import { ChatMessages } from "./components/ChatMessages";
 import { ChatInput } from "./components/ChatInput";
 
 const RAILWAY_API_URL =
-  process.env.NODE_ENV === "production"
+  import.meta.env.PROD
     ? "https://chatbot-word-production.up.railway.app"
     : "http://localhost:3000";
 

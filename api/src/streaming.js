@@ -1,4 +1,33 @@
 import OpenAI from 'openai';
+import dotenv from 'dotenv';
+import path from "path";
+import { fileURLToPath } from "url";
+import fs from "fs";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Cargar .env manualmente si dotenv no funciona
+const envPath = path.resolve(__dirname, '../.env');
+if (fs.existsSync(envPath)) {
+  const envContent = fs.readFileSync(envPath, 'utf8');
+  const envLines = envContent.split('\n');
+  for (const line of envLines) {
+    const trimmed = line.trim();
+    if (trimmed && !trimmed.startsWith('#')) {
+      const [key, ...valueParts] = trimmed.split('=');
+      if (key && valueParts.length > 0) {
+        const value = valueParts.join('=').trim();
+        process.env[key.trim()] = value;
+      }
+    }
+  }
+}
+
+console.log("STREAMING OPENAI KEY:", process.env.OPENAI_API_KEY?.slice(0, 15));
+console.log("STREAMING CWD:", process.cwd());
+console.log("STREAMING Env file path:", envPath);
+console.log("STREAMING Env file exists:", fs.existsSync(envPath));
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -8,10 +37,16 @@ const DEEPSEEK_API_URL = process.env.DEEPSEEK_API_URL;
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 const STREAM_TIMEOUT = 30000; // 30 segundos máximo
 
+function buildAssistantSystemPrompt(context) {
+  if (context && context.trim().length > 0) {
+    return `You are a helpful document analysis assistant. Prioritize information from the provided document context when answering. If the context contains the answer, use it. If the question requires general knowledge or the context is insufficient, answer helpfully using your broader knowledge while avoiding inventing facts. Always respond in the same language as the question and use markdown formatting for better readability.\n\nContext:\n${context}`;
+  }
+
+  return "You are a helpful AI assistant. Answer questions conversationally and helpfully, using markdown formatting when appropriate.";
+}
+
 export async function streamOpenAIResponse(context, question, onChunk) {
-  const systemPrompt = context
-    ? `You are a document analysis assistant. Answer questions based ONLY on the provided context from uploaded documents. If the information is not available in the context, respond with "No se encontró información relevante en los documentos subidos." Do not use external knowledge or make assumptions. Respond in the same language as the question. Use markdown formatting for better readability.\n\nContext:\n${context}`
-    : "You are a document analysis assistant. Since no documents have been uploaded or found, I cannot provide information. Please upload documents first and then ask questions about their content.";
+  const systemPrompt = buildAssistantSystemPrompt(context);
 
   const stream = await client.chat.completions.create({
     model: 'gpt-3.5-turbo',
@@ -21,8 +56,7 @@ export async function streamOpenAIResponse(context, question, onChunk) {
     ],
     stream: true,
     temperature: 0.7,
-    max_tokens: 1024,
-    timeout: STREAM_TIMEOUT
+    max_tokens: 1024
   });
 
   let fullResponse = '';
@@ -39,9 +73,7 @@ export async function streamOpenAIResponse(context, question, onChunk) {
 }
 
 export async function streamDeepSeekResponse(context, question, onChunk) {
-  const systemPrompt = context
-    ? `You are a document analysis assistant. Answer questions based ONLY on the provided context from uploaded documents. If the information is not available in the context, respond with "No se encontró información relevante en los documentos subidos." Do not use external knowledge or make assumptions. Respond in the same language as the question. Use markdown formatting for better readability.\n\nContext:\n${context}`
-    : "You are a document analysis assistant. Since no documents have been uploaded or found, I cannot provide information. Please upload documents first and then ask questions about their content.";
+  const systemPrompt = buildAssistantSystemPrompt(context);
 
   const payload = {
     model: 'deepseek-chat',
