@@ -374,34 +374,22 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       return res.status(400).json({ error: "could not extract text from file" });
     }
 
-    const chunks = smartChunk(text);
-    const mergedChunks = mergeSmallChunks(chunks, 100);
+    // Guardar el texto completo sin chunking para mejor recuperación
+    const chunks = [{ text, tokens: Math.ceil(text.length / 4) }];
 
-    console.log(`Extracted: ${text.length} chars, ${mergedChunks.length} chunks`);
+    console.log(`Extracted: ${text.length} chars, guardando como documento completo`);
 
     const metadata = getDocumentMetadata(originalName, text);
 
-    const ids = [];
-    const documents = [];
-    const metadatas = [];
-    const embeddings = [];
-
-    for (let i = 0; i < mergedChunks.length; i++) {
-      const chunk = mergedChunks[i];
-      const chunkId = `${originalName}#chunk-${i}`;
-      const emb = await embed(chunk.text);
-
-      ids.push(chunkId);
-      documents.push(chunk.text);
-      metadatas.push({
-        ...metadata,
-        chunkIndex: i,
-        totalChunks: mergedChunks.length,
-        tokens: chunk.tokens,
-        uploadedAt: new Date().toISOString()
-      });
-      embeddings.push(emb);
-    }
+    const ids = [originalName];
+    const documents = [text];
+    const metadatas = [{
+      ...metadata,
+      tokens: Math.ceil(text.length / 4),
+      uploadedAt: new Date().toISOString(),
+      isCompleteText: true
+    }];
+    const embeddings = [await embed(text)];
 
     const collection = await getCollection("documents");
 
@@ -429,8 +417,9 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       inserted: ids.length,
       id: originalName,
       textLength: text.length,
-      chunksCount: mergedChunks.length,
-      metadata
+      chunksCount: 1, // Siempre 1 documento completo
+      metadata,
+      isCompleteText: true
     });
   } catch (err) {
     console.error("/upload error", err);
