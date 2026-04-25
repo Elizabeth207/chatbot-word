@@ -37,6 +37,11 @@ import { multimodalHandler } from "./multimodalController.js";
 
 const PORT = process.env.PORT || 3000;
 
+// Health check endpoint
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
+});
+
 // Rutas
 app.post("/ingest", async (req, res) => await ingestDocuments(req, res));
 app.post("/query", async (req, res) => await queryHandler(req, res));
@@ -45,7 +50,19 @@ app.post("/query/stream", async (req, res) => await queryStreamHandler(req, res)
 app.post("/query-multimodal", upload.single("image"), async (req, res) => await multimodalHandler(req, res));
 app.get("/debug/docs", async (req, res) => await debugDocsHandler(req, res));
 
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error("❌ Error:", err.message);
+  res.status(500).json({ error: err.message || "Internal Server Error" });
+});
+
+// Handle uncaught exceptions
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("❌ Unhandled Rejection at:", promise, "reason:", reason);
+});
+
 // Iniciar servidor
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📍 Health check: http://localhost:${PORT}/health`);
 });
