@@ -24,9 +24,6 @@ if (fs.existsSync(envPath)) {
   }
 }
 
-console.log("🔑 OPENAI KEY:", process.env.OPENAI_API_KEY?.slice(0, 15));
-console.log("🔑 DEEPSEEK KEY:", process.env.DEEPSEEK_API_KEY?.slice(0, 15));
-
 // Importar configuración del servidor
 import { app, upload } from "./serverSetup.js";
 
@@ -49,6 +46,6 @@ app.post("/query-multimodal", upload.single("image"), async (req, res) => await 
 app.get("/debug/docs", async (req, res) => await debugDocsHandler(req, res));
 
 // Iniciar servidor
-app.listen(PORT, () => {
-  console.log(`🚀 RAG API listening on http://localhost:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server running on port ${PORT}`);
 });
