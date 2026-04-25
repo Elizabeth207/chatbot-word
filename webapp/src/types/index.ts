@@ -1,3 +1,5 @@
+export type { Chat } from "./chat";
+
 export type Message = {
   role: "user" | "assistant";
   text: string;

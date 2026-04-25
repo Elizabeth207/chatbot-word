@@ -1,27 +1,44 @@
-# CHATBOT (RAG) - API
+# Chatbot (RAG) — API
 
-Pasos rápidos para ejecutar el backend (Node + Express):
+Backend **Node.js + Express**: extracción de texto (PDF, Office, imágenes), embeddings, RAG y respuestas en streaming.
 
-- Copia `api/.env.example` a `api/.env` y rellena `OPENAI_API_KEY`, `DEEPSEEK_API_URL` y `DEEPSEEK_API_KEY`.
-- Desde `e:/chatbot-rag/api` instala dependencias:
+## Arranque
 
 ```bash
+cd api
 npm install
+cp .env.example .env
 ```
 
-- Inicia el servidor en modo desarrollo:
+Edita `api/.env` (por ejemplo `OPENAI_API_KEY`). Arranca:
 
 ```bash
 npm run dev
 ```
 
-Endpoints principales:
+El servidor escucha en el puerto definido por `PORT` (por defecto **3000**).
 
-- `POST /ingest` : Ingesta documentos en la colección Chroma.
-  - Body JSON: `{ documents: [{ id, text, metadata }] }`
-- `POST /query` : Realiza búsqueda semántica y genera respuesta con DeepSeek.
-  - Body JSON: `{ question: "...", k: 4 }`
+## Rutas principales
 
-Notas:
-- Este backend usa la API de OpenAI para embeddings y una colección Chroma local.
-- El wrapper de DeepSeek espera que `DEEPSEEK_API_URL` reciba `{ context, question }` y devuelva `{ answer }` o similar.
+| Método | Ruta | Descripción |
+|--------|------|--------------|
+| `POST` | `/ingest` | Ingesta de documentos JSON |
+| `POST` | `/query` | Pregunta con RAG (respuesta SSE) |
+| `POST` | `/query/stream` | Variante streaming del query |
+| `POST` | `/upload` | Subida de archivo (`multipart`, campo `file`) |
+| `POST` | `/query-multimodal` | Archivo + pregunta (`multipart`, campo `image`) |
+| `GET` | `/debug/docs` | Depuración de documentos indexados |
+
+## Script de ejemplo
+
+Para indexar `.md` desde una carpeta:
+
+```bash
+cd api
+node scripts/ingestSample.js ../ruta/a/tus/archivos
+```
+
+## Notas
+
+- Sin `OPENAI_API_KEY` válida, los embeddings pueden usar un modo simulado según la lógica de `openaiClient.js`.
+- Variables sensibles: no subas `.env` al repositorio.

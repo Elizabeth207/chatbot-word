@@ -2,10 +2,10 @@
   "name": "api",
   "version": "1.0.0",
   "description": "",
-  "main": "src/index.js",
+  "main": "src/controllers/index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon --watch src --exec node src/index.js",
+    "start": "node src/controllers/index.js",
+    "dev": "nodemon --watch src --exec node src/controllers/index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
