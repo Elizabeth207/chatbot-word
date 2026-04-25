@@ -14,6 +14,7 @@ app.use(cors({
   ],
   methods: ["GET", "POST"]
 }));
+app.options("*", cors());
 app.use(express.json({ limit: "2mb" }));
 const upload = multer({ storage: multer.memoryStorage() });
 
