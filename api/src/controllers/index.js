@@ -35,13 +35,6 @@ import { queryStreamHandler } from "./queryStreamController.js";
 import { debugDocsHandler } from "./debugDocsController.js";
 import { multimodalHandler } from "./multimodalController.js";
 
-const PORT = process.env.PORT || 3000;
-
-// Health check endpoint
-app.get("/health", (req, res) => {
-  res.json({ status: "ok" });
-});
-
 // Rutas
 app.post("/ingest", async (req, res) => await ingestDocuments(req, res));
 app.post("/query", async (req, res) => await queryHandler(req, res));
@@ -59,10 +52,4 @@ app.use((err, req, res, next) => {
 // Handle uncaught exceptions
 process.on("unhandledRejection", (reason, promise) => {
   console.error("❌ Unhandled Rejection at:", promise, "reason:", reason);
-});
-
-// Iniciar servidor
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📍 Health check: http://localhost:${PORT}/health`);
 });
