@@ -12,7 +12,8 @@ app.use(cors({
     "http://localhost:5173",
     "https://chatbot-word-production.up.railway.app"
   ],
-  methods: ["GET", "POST"]
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type"]
 }));
 app.options("*", cors());
 app.use(express.json({ limit: "2mb" }));
