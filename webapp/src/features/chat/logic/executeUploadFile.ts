@@ -1,5 +1,5 @@
 import type { Message } from "../../../types";
-import { RAILWAY_API_URL } from "../../../config/constants";
+import { API_URL } from "../../../config/constants";
 import { formatMessageTime } from "../lib/formatTime";
 
 export type UploadContext = {
@@ -19,7 +19,7 @@ export async function executeUploadFile(u: UploadContext): Promise<void> {
     const fd = new FormData();
     fd.append("file", u.file, u.file.name);
     fd.append("sessionId", u.sessionId);
-    const resp = await fetch(`${RAILWAY_API_URL}/upload`, { method: "POST", body: fd });
+    const resp = await fetch(`${API_URL}/upload`, { method: "POST", body: fd });
     const data = (await resp.json()) as {
       error?: string;
       id?: string;

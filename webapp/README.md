@@ -10,7 +10,7 @@ npm install
 npm run dev
 ```
 
-Por defecto la UI llama a `http://localhost:3000` en desarrollo (ver `src/config/constants.ts`). En producción usa la URL de Railway definida ahí.
+Por defecto la UI llama a `http://localhost:3000` en desarrollo (ver `src/config/constants.ts`). En producción usa la URL de Render definida ahí.
 
 ## Scripts
 

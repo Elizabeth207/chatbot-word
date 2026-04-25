@@ -1,5 +1,5 @@
 import type { Message } from "../../../types";
-import { RAILWAY_API_URL } from "../../../config/constants";
+import { API_URL } from "../../../config/constants";
 import { formatMessageTime } from "../lib/formatTime";
 import { runStreamedTextQuery } from "./runStreamedTextQuery";
 
@@ -45,7 +45,7 @@ export async function executeSendMessage(s: SendContext): Promise<void> {
       fd.append("useLightRAG", String(s.useLightRAG));
       fd.append("k", "4");
       fd.append("sessionId", s.sessionId);
-      const response = await fetch(`${RAILWAY_API_URL}/query-multimodal`, { method: "POST", body: fd });
+      const response = await fetch(`${API_URL}/query-multimodal`, { method: "POST", body: fd });
       const data = (await response.json()) as {
         error?: string;
         answer?: string;

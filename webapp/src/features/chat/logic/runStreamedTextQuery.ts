@@ -1,5 +1,5 @@
 import type { Message } from "../../../types";
-import { RAILWAY_API_URL } from "../../../config/constants";
+import { API_URL } from "../../../config/constants";
 import { readQuerySseStream } from "../api/readQuerySseStream";
 import { formatMessageTime } from "../lib/formatTime";
 
@@ -13,7 +13,7 @@ export async function runStreamedTextQuery(
   updateCurrentChat: UpdateFn
 ): Promise<void> {
   const body = { question, useLightRAG, k: 4, sessionId };
-  const response = await fetch(`${RAILWAY_API_URL}/query`, {
+  const response = await fetch(`${API_URL}/query`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
